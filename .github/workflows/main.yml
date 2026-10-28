@@ -9,8 +9,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Получить исходный код
+      - name: Получить файлы
         uses: actions/checkout@v4
 
       - name: Установить Java
@@ -19,24 +20,58 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Подготовить Android SDK
+      - name: Найти и распаковать Android-проект
+        shell: bash
         run: |
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "sdk.dir=$ANDROID_HOME" > local.properties
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+          set -e
+          mkdir -p source
+          ZIP="$(find . -maxdepth 3 -type f -name '*.zip' -print -quit)"
+          if [ -n "$ZIP" ]; then
+            unzip -oq "$ZIP" -d source
+          else
+            cp -a . source/
+          fi
 
-      - name: Настроить Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.9'
+          SETTINGS="$(find source -type f \( -name settings.gradle -o -name settings.gradle.kts \) -print -quit)"
+          if [ -z "$SETTINGS" ]; then
+            echo "ОШИБКА: Не найден settings.gradle или settings.gradle.kts."
+            echo "Файлы в репозитории:"
+            find . -maxdepth 3 -type f | head -80
+            exit 1
+          fi
+
+          echo "PROJECT_DIR=$(dirname "$SETTINGS")" >> "$GITHUB_ENV"
+          echo "Найден проект: $(dirname "$SETTINGS")"
+
+      - name: Подготовить Android SDK
+        shell: bash
+        run: |
+          set -e
+          echo "sdk.dir=$ANDROID_HOME" > "$PROJECT_DIR/local.properties"
+          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -name sdkmanager -type f 2>/dev/null | head -1)"
+          if [ -n "$SDKMANAGER" ]; then
+            yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+            "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          else
+            echo "Не найден sdkmanager в Android SDK"
+            exit 1
+          fi
 
       - name: Собрать APK
-        run: gradle assembleDebug
+        shell: bash
+        run: |
+          set -e
+          cd "$PROJECT_DIR"
+          if [ -f gradlew ]; then
+            chmod +x gradlew
+            ./gradlew assembleDebug
+          else
+            gradle assembleDebug
+          fi
 
       - name: Сохранить APK
         uses: actions/upload-artifact@v4
         with:
           name: KofemolnikAI-APK
-          path: app/build/outputs/apk/debug/*.apk
+          path: '**/build/outputs/apk/debug/*.apk'
           if-no-files-found: error
-
