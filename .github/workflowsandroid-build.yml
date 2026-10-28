@@ -1,63 +1,68 @@
 
-name: Build KofemolnikAI APK
+name: Сборка Кофемольник ИИ APK
 
 on:
   workflow_dispatch:
   push:
-    paths:
-      - '*.zip'
-      - '.github/workflows/android-build.yml'
-
-permissions:
-  contents: read
+    branches: [main]
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Download repository files
+      - name: Скачать репозиторий
         uses: actions/checkout@v4
 
-      - name: Find and extract Android project ZIP
-        shell: bash
-        run: |
-          set -euo pipefail
-          ZIP_FILE="$(find . -maxdepth 1 -type f -iname '*.zip' -print -quit)"
-          if [ -z "$ZIP_FILE" ]; then
-            echo "ZIP-архив не найден в корне репозитория."
-            exit 1
-          fi
-          mkdir -p extracted
-          unzip -q "$ZIP_FILE" -d extracted
-          PROJECT_DIR="$(find extracted -type f -name 'settings.gradle.kts' -printf '%h\n' | head -n 1)"
-          if [ -z "$PROJECT_DIR" ]; then
-            echo "В ZIP не найден Android-проект."
-            exit 1
-          fi
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-
-      - name: Set up JDK 17
+      - name: Установить Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
+      - name: Найти и распаковать проект
+        shell: bash
+        run: |
+          ZIP=$(find . -maxdepth 2 -type f -name '*.zip' | head -n 1)
+          if [ -z "$ZIP" ]; then
+            echo "ОШИБКА: ZIP проекта не найден в репозитории"
+            exit 1
+          fi
+          mkdir -p source
+          unzip -oq "$ZIP" -d source
+          PROJECT=$(find source -type f -name settings.gradle -o -name settings.gradle.kts | head -n 1)
+          if [ -z "$PROJECT" ]; then
+            echo "ОШИБКА: В ZIP не найден Android-проект с settings.gradle"
+            find source -maxdepth 3 -type f | head -n 50
+            exit 1
+          fi
+          echo "PROJECT_DIR=$(dirname "$PROJECT")" >> "$GITHUB_ENV"
+
+      - name: Установить Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.9'
+      - name: Настроить Android SDK
+        shell: bash
+        run: |
+          echo "sdk.dir=$ANDROID_HOME" > "$PROJECT_DIR/local.properties"
+          yes | sdkmanager --licenses || true
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
-      - name: Build debug APK
+      - name: Собрать APK
+        shell: bash
         run: |
           cd "$PROJECT_DIR"
-          gradle assembleDebug --no-daemon
+          if [ -f gradlew ]; then
+            chmod +x gradlew
+            ./gradlew assembleDebug
+          else
+            gradle assembleDebug
+          fi
 
-      - name: Upload APK
+      - name: Сохранить APK
         uses: actions/upload-artifact@v4
         with:
-          name: KofemolnikAI-debug-apk
-          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk
+          name: KofemolnikAI-APK
+          path: source/**/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
