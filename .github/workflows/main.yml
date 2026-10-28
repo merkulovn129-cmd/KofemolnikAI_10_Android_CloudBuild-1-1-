@@ -19,10 +19,13 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Установить Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Подготовить Android SDK
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
 
-      - name: Установить Gradle
+      - name: Настроить Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
@@ -36,3 +39,4 @@ jobs:
           name: KofemolnikAI-APK
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
